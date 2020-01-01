@@ -76,12 +76,6 @@ enum {
 	SETGROUPS_ALLOW = 1,
 };
 
-enum {
-	MAP_USER_NONE,
-	MAP_USER_ROOT,
-	MAP_USER_CURRENT,
-};
-
 static const char *setgroups_strings[] =
 {
 	[SETGROUPS_DENY] = "deny",
@@ -330,7 +324,9 @@ int main(int argc, char *argv[])
 
 	int setgrpcmd = SETGROUPS_NONE;
 	int unshare_flags = 0;
-	int c, forkit = 0, mapuser = MAP_USER_NONE;
+	int c, forkit = 0;
+	uid_t mapuser = -1;
+	gid_t mapgroup = -1;
 	int kill_child_signo = 0; /* 0 means --kill-child was not used */
 	const char *procmnt = NULL;
 	const char *newroot = NULL;
@@ -394,20 +390,14 @@ int main(int argc, char *argv[])
 			procmnt = optarg ? optarg : "/proc";
 			break;
 		case 'r':
-			if (mapuser == MAP_USER_CURRENT)
-			        errx(EXIT_FAILURE, _("options --map-root-user and "
-					"--map-current-user are mutually exclusive"));
-
 			unshare_flags |= CLONE_NEWUSER;
-			mapuser = MAP_USER_ROOT;
+			mapuser = 0;
+			mapgroup = 0;
 			break;
 		case 'c':
-			if (mapuser == MAP_USER_ROOT)
-			        errx(EXIT_FAILURE, _("options --map-root-user and "
-					"--map-current-user are mutually exclusive"));
-
 			unshare_flags |= CLONE_NEWUSER;
-			mapuser = MAP_USER_CURRENT;
+			mapuser = real_euid;
+			mapgroup = real_egid;
 			break;
 		case OPT_SETGROUPS:
 			setgrpcmd = setgroups_str2id(optarg);
@@ -508,33 +498,23 @@ int main(int argc, char *argv[])
 	if (kill_child_signo != 0 && prctl(PR_SET_PDEATHSIG, kill_child_signo) < 0)
 		err(EXIT_FAILURE, "prctl failed");
 
+        if (mapuser != (uid_t) -1)
+		map_id(_PATH_PROC_UIDMAP, mapuser, real_euid);
+
         /* Since Linux 3.19 unprivileged writing of /proc/self/gid_map
          * has been disabled unless /proc/self/setgroups is written
          * first to permanently disable the ability to call setgroups
          * in that user namespace. */
-        switch (mapuser) {
-        case MAP_USER_ROOT:
+	if (mapgroup != (gid_t) -1) {
 		if (setgrpcmd == SETGROUPS_ALLOW)
 			errx(EXIT_FAILURE, _("options --setgroups=allow and "
-					"--map-root-user are mutually exclusive"));
-
+					"--map-*-user are mutually exclusive"));
 		setgroups_control(SETGROUPS_DENY);
-		map_id(_PATH_PROC_UIDMAP, 0, real_euid);
-		map_id(_PATH_PROC_GIDMAP, 0, real_egid);
-                break;
-        case MAP_USER_CURRENT:
-		if (setgrpcmd == SETGROUPS_ALLOW)
-			errx(EXIT_FAILURE, _("options --setgroups=allow and "
-					"--map-current-user are mutually exclusive"));
+		map_id(_PATH_PROC_GIDMAP, mapgroup, real_egid);
+	}
 
-		setgroups_control(SETGROUPS_DENY);
-		map_id(_PATH_PROC_UIDMAP, real_euid, real_euid);
-		map_id(_PATH_PROC_GIDMAP, real_egid, real_egid);
-                break;
-        case MAP_USER_NONE:
-	        if (setgrpcmd != SETGROUPS_NONE)
-		        setgroups_control(setgrpcmd);
-        }
+	if (setgrpcmd != SETGROUPS_NONE)
+		setgroups_control(setgrpcmd);
 
 	if ((unshare_flags & CLONE_NEWNS) && propagation)
 		set_propagation(propagation);
