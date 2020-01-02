@@ -263,8 +263,12 @@ static void __attribute__((__noreturn__)) usage(void)
 	fputs(_(" -C, --cgroup[=<file>]     unshare cgroup namespace\n"), out);
 	fputs(USAGE_SEPARATOR, out);
 	fputs(_(" -f, --fork                fork before launching <program>\n"), out);
-	fputs(_(" -r, --map-root-user       map current user to root (implies --user)\n"), out);
-	fputs(_(" -c, --map-current-user    map current user to itself (implies --user)\n"), out);
+	fputs(_(" --map-user <uid>          map current user to uid (implies --user)\n"), out);
+	fputs(_(" --map-group <gid>         map current group to gid (implies --user)\n"), out);
+	fputs(_(" -r, --map-root-user       map current user to root (implies --user)\n"
+	        "                             equivilant to --map-user=0 --map-group=0\n"), out);
+	fputs(_(" -c, --map-current-user    map current user to itself (implies --user)\n"
+	        "                             equivilant to --map-user=$(id -ru) --map-group=$(id -rg)\n"), out);
 	fputs(USAGE_SEPARATOR, out);
 	fputs(_(" --kill-child[=<signame>]  when dying, kill the forked child (implies --fork)\n"
 		"                             defaults to SIGKILL\n"), out);
@@ -294,6 +298,8 @@ int main(int argc, char *argv[])
 		OPT_SETGROUPS,
 		OPT_KILLCHILD,
 		OPT_KEEPCAPS,
+		OPT_MAPUSER,
+		OPT_MAPGROUP,
 	};
 	static const struct option longopts[] = {
 		{ "help",          no_argument,       NULL, 'h'             },
@@ -312,6 +318,8 @@ int main(int argc, char *argv[])
 		{ "mount-proc",    optional_argument, NULL, OPT_MOUNTPROC   },
 		{ "map-root-user", no_argument,       NULL, 'r'             },
 		{ "map-current-user", no_argument,    NULL, 'c'             },
+		{ "map-user",      required_argument, NULL, OPT_MAPUSER     },
+		{ "map-group",     required_argument, NULL, OPT_MAPGROUP    },
 		{ "propagation",   required_argument, NULL, OPT_PROPAGATION },
 		{ "setgroups",     required_argument, NULL, OPT_SETGROUPS   },
 		{ "keep-caps",     no_argument,       NULL, OPT_KEEPCAPS    },
@@ -398,6 +406,14 @@ int main(int argc, char *argv[])
 			unshare_flags |= CLONE_NEWUSER;
 			mapuser = real_euid;
 			mapgroup = real_egid;
+			break;
+		case OPT_MAPUSER:
+			unshare_flags |= CLONE_NEWUSER;
+			mapuser = strtoul_or_err(optarg, _("failed to parse uid"));
+			break;
+		case OPT_MAPGROUP:
+			unshare_flags |= CLONE_NEWUSER;
+			mapgroup = strtoul_or_err(optarg, _("failed to parse gid"));
 			break;
 		case OPT_SETGROUPS:
 			setgrpcmd = setgroups_str2id(optarg);
@@ -508,7 +524,7 @@ int main(int argc, char *argv[])
 	if (mapgroup != (gid_t) -1) {
 		if (setgrpcmd == SETGROUPS_ALLOW)
 			errx(EXIT_FAILURE, _("options --setgroups=allow and "
-					"--map-*-user are mutually exclusive"));
+					"--map-group are mutually exclusive"));
 		setgroups_control(SETGROUPS_DENY);
 		map_id(_PATH_PROC_GIDMAP, mapgroup, real_egid);
 	}
